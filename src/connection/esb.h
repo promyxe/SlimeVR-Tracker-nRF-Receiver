@@ -72,6 +72,11 @@
 #define ESB_PONG_FLAG_DATA_COLLECT_ON 0x22  // Start raw data collection
 #define ESB_PONG_FLAG_DATA_COLLECT_OFF 0x23 // Stop raw data collection
 
+// PING power state flags (embedded in PING data[9] by trackers)
+#define ESB_PING_PWR_NORMAL       0x00  // Normal operation
+#define ESB_PING_PWR_WOM          0x01  // Entering WoM (shallow sleep, will wake on motion)
+#define ESB_PING_PWR_SYSTEM_OFF   0x02  // Entering system off (deep sleep / shutdown)
+
 // Raw data collection packet types
 #define ESB_RAW_IMU_TYPE    0x10  // Raw IMU data (float, with piggybacked mag)
 #define ESB_RAW_MAG_TYPE    0x11  // Raw magnetometer data (float, reserved)
