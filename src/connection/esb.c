@@ -120,6 +120,7 @@ static uint64_t last_ping_time[MAX_TRACKERS] = {0}; // Track the last time a PIN
 static uint8_t last_pong_queued_counter[MAX_TRACKERS] = {0}; // Track the last PONG counter enqueued for each tracker
 static uint8_t packet_count[MAX_TRACKERS] = {0};             // Packet count received from each tracker
 static volatile uint8_t ping_power_state[MAX_TRACKERS];       // Power state from PING data[9] (ISR-written)
+static volatile uint8_t ping_status_byte[MAX_TRACKERS];       // Status bitfield from PING data[10] (ISR-written)
 // Shared ACK state: written by threads/event_handler, read by ack_handler (radio ISR).
 // On single-core Cortex-M, volatile ensures visibility between ISR priorities.
 static volatile uint8_t tracker_remote_command[MAX_TRACKERS]; // Command flag for next PONG
@@ -1376,6 +1377,25 @@ void event_handler(struct esb_evt const *event)
 						}
 					}
 
+					/* React to tracker status changes from PING data[10] */
+					{
+						uint8_t st = rx_payload.data[10];
+						static uint8_t last_st[MAX_TRACKERS];
+						uint8_t changed = st ^ last_st[tracker_id];
+						if (changed) {
+							last_st[tracker_id] = st;
+							if (changed & ESB_PING_STAT_BATT_LOW && (st & ESB_PING_STAT_BATT_LOW))
+								LOG_WRN("Tracker %u battery low", tracker_id);
+							if (changed & ESB_PING_STAT_CALIBRATING)
+								LOG_INF("Tracker %u calibration %s", tracker_id,
+									(st & ESB_PING_STAT_CALIBRATING) ? "started" : "finished");
+							if (changed & ESB_PING_STAT_SENSOR_ERR && (st & ESB_PING_STAT_SENSOR_ERR))
+								LOG_ERR("Tracker %u sensor error", tracker_id);
+							if (changed & ESB_PING_STAT_SYSTEM_ERR && (st & ESB_PING_STAT_SYSTEM_ERR))
+								LOG_ERR("Tracker %u system error", tracker_id);
+						}
+					}
+
 					uint32_t tracker_estimated_server_ticks
 						= ((uint32_t)rx_payload.data[3] << 24) | ((uint32_t)rx_payload.data[4] << 16)
 						| ((uint32_t)rx_payload.data[5] << 8) | ((uint32_t)rx_payload.data[6]);
@@ -2022,6 +2042,7 @@ void esb_pop_pair(void)
 		uint64_t zero_addr = 0;
 		nvs_write_async(STORED_ADDR_0 + removed_id, &zero_addr, sizeof(zero_addr));
 		ping_power_state[removed_id] = 0;
+		ping_status_byte[removed_id] = 0;
 		LOG_INF("Removed device on id %d with address %012llX", removed_id, removed_addr);
 	} else {
 		LOG_WRN("No devices to remove");
@@ -2167,6 +2188,7 @@ void esb_clear(void)
 		last_packet_sequence[i] = 0;
 		packet_count[i] = 0;
 		ping_power_state[i] = 0;
+		ping_status_byte[i] = 0;
 		memset(&tracker_stats[i], 0, sizeof(struct packet_stats));
 	}
 	LOG_INF("Packet sequence state and statistics reset for all trackers");

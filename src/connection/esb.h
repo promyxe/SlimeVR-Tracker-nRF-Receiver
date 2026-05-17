@@ -77,6 +77,14 @@
 #define ESB_PING_PWR_WOM          0x01  // Entering WoM (shallow sleep, will wake on motion)
 #define ESB_PING_PWR_SYSTEM_OFF   0x02  // Entering system off (deep sleep / shutdown)
 
+// PING status byte flags (embedded in PING data[10] by trackers)
+#define ESB_PING_STAT_BATT_LOW     0x01  // Battery <10%
+#define ESB_PING_STAT_CALIBRATING  0x02  // Calibration running
+#define ESB_PING_STAT_SENSOR_ERR   0x04  // Sensor error
+#define ESB_PING_STAT_SYSTEM_ERR   0x08  // System error
+#define ESB_PING_STAT_MAG_ENABLED  0x10  // Magnetometer enabled
+#define ESB_PING_STAT_PLUGGED      0x20  // Charging / plugged in
+
 // Raw data collection packet types
 #define ESB_RAW_IMU_TYPE    0x10  // Raw IMU data (float, with piggybacked mag)
 #define ESB_RAW_MAG_TYPE    0x11  // Raw magnetometer data (float, reserved)
