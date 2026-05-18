@@ -116,6 +116,7 @@ static const uint8_t hid_report_desc[] = {
 uint16_t sent_device_addr = 0;
 bool usb_enabled = false;
 int64_t last_registration_sent = 0;
+int64_t last_server_hid_out_time = 0;
 
 //|type    |description
 //|TX   255|receiver packet 0, associate id and tracker address
@@ -405,7 +406,9 @@ static void read_report(struct k_work *work)
 
 	if (!atomic_test_and_set_bit(hid_ep_out_busy, HID_EP_BUSY_FLAG)) {
 		ret = hid_int_ep_read(hdev, ep_read_buffer, sizeof(ep_read_buffer), &read);
-		if (ret != 0) {
+		if (ret == 0 && read > 0) {
+			last_server_hid_out_time = k_uptime_get();
+		} else if (ret != 0) {
 			LOG_ERR("hid_int_ep_read: %d", ret);
 		}
 	}

@@ -729,6 +729,21 @@ static void esb_stats_thread(void)
 			}
 		}
 
+		// Shutdown all trackers once if no HID communication from server for 15 minutes
+		if (stored_trackers > 0) {
+			static bool shutdown_sent = false;
+			int64_t now_ms = k_uptime_get();
+			if (last_server_hid_out_time > 0 && now_ms - last_server_hid_out_time > 900000) {
+				if (!shutdown_sent) {
+					LOG_WRN("No server HID communication for 15 min, shutting down all trackers");
+					esb_request_all_shutdown();
+					shutdown_sent = true;
+				}
+			} else {
+				shutdown_sent = false;
+			}
+		}
+
 		// Print total TPS every second (always)
 		if (now - last_tps_print_time >= TPS_CALCULATION_INTERVAL_MS) {
 			uint32_t total_tps = 0;

@@ -30,4 +30,6 @@ uint32_t hid_get_current_tps(void);
 void hid_reset_rssi_smooth(uint8_t tracker_id);
 void hid_reset_all_rssi_smooth(void);
 
+extern int64_t last_server_hid_out_time;
+
 #endif
