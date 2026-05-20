@@ -329,6 +329,23 @@ static volatile bool g_ping_isr_rx_ticks_valid[MAX_TRACKERS] = {false};
 static volatile uint32_t g_last_isr_rx_ticks[MAX_TRACKERS] = {0};
 static volatile bool g_last_isr_rx_valid[MAX_TRACKERS] = {false};
 
+/* Clock bias drift rate estimation (ppb = parts per billion).
+ * Uses the same long-baseline approach as the tracker firmware:
+ * hold a reference point and measure total drift over time,
+ * averaging out PING retransmission noise naturally.
+ *
+ * g_bias_ppb: estimated drift rate in ppb, positive = tracker clock
+ *   is fast relative to receiver.
+ * g_bias_ref_offset: clock_bias at the reference point.
+ * g_bias_ref_ticks: receiver ticks at the reference point.
+ * g_last_ping_isr_rx_ticks_raw: ticks of the most recent PING,
+ *   used as elapsed-time baseline for per-packet extrapolation. */
+static bool g_bias_ppb_valid[MAX_TRACKERS] = {0};
+static int32_t g_bias_ppb[MAX_TRACKERS] = {0};
+static int32_t g_bias_ref_offset[MAX_TRACKERS] = {0};
+static uint32_t g_bias_ref_ticks[MAX_TRACKERS] = {0};
+static uint32_t g_last_ping_isr_rx_ticks_raw[MAX_TRACKERS] = {0};
+
 #if TDMA_ENABLED
 /**
  * Check if a packet from a tracker arrived in its assigned TDMA slot.
@@ -366,10 +383,22 @@ static void tdma_check_slot(uint8_t tracker_id, uint32_t rx_ticks)
 
 	/*
 	 * Compensate receiver clock vs tracker clock offset.
+	 * Base bias: last clean PING measurement.
 	 */
 	int32_t clock_bias = g_last_ping_rx_time_diff_valid[tracker_id]
 		? g_last_ping_rx_time_diff_ticks[tracker_id]
 		: 0;
+
+	/* Drift extrapolation: clock_bias changes linearly between PINGs.
+	 * Uses long-baseline ppb estimation (same approach as tracker firmware).
+	 * Compute expected drift since the last PING and correct for it,
+	 * keeping the effective bias accurate throughout the PING interval. */
+	if (clock_bias && g_bias_ppb_valid[tracker_id]) {
+		uint32_t elapsed = rx_ticks - g_last_ping_isr_rx_ticks_raw[tracker_id];
+		int32_t drift_comp = (int32_t)((int64_t)g_bias_ppb[tracker_id] * elapsed / 1000000000LL);
+		clock_bias += drift_comp;
+	}
+
 	uint32_t adjusted_rx_ticks = (uint32_t)((int32_t)rx_ticks - clock_bias);
 
 	/* Calculate current position in the TDMA frame (tracker-relative) */
@@ -1225,6 +1254,8 @@ void event_handler(struct esb_evt const *event)
 					 * (a 400-tick spike only moves bias by 2 instead of 50).
 					 */
 					#define CLOCK_BIAS_MAX_UP_PER_PING 2
+					int32_t prev_bias = g_last_ping_rx_time_diff_valid[tracker_id]
+						? g_last_ping_rx_time_diff_ticks[tracker_id] : 0;
 					if (!g_last_ping_rx_time_diff_valid[tracker_id]) {
 						g_last_ping_rx_time_diff_ticks[tracker_id] = rx_time_diff_ticks;
 					} else {
@@ -1242,6 +1273,39 @@ void event_handler(struct esb_evt const *event)
 						}
 					}
 					g_last_ping_rx_time_diff_valid[tracker_id] = true;
+
+					/* Update clock bias drift rate using long-baseline ppb
+					 * estimation (mirrors tracker's clock skew approach).
+					 * Only computed from clean (unclamped) measurements
+					 * to avoid retransmission noise corrupting the rate. */
+					if (prev_bias != 0) {
+						if (!g_bias_ppb_valid[tracker_id]) {
+							/* First clean measurement: initialize reference */
+							g_bias_ref_offset[tracker_id] = g_last_ping_rx_time_diff_ticks[tracker_id];
+							g_bias_ref_ticks[tracker_id] = isr_rx_ticks;
+							g_bias_ppb[tracker_id] = 0;
+							g_bias_ppb_valid[tracker_id] = true;
+						} else {
+							uint32_t elapsed = isr_rx_ticks - g_bias_ref_ticks[tracker_id];
+							if (elapsed >= 32768u) {
+								int32_t new_bias = g_last_ping_rx_time_diff_ticks[tracker_id];
+								int64_t total_drift = (int64_t)(new_bias - g_bias_ref_offset[tracker_id]);
+								int32_t raw_ppb = (int32_t)(total_drift * 1000000000LL / elapsed);
+								if (g_bias_ppb_valid[tracker_id] > 1) {
+									g_bias_ppb[tracker_id] += (raw_ppb - g_bias_ppb[tracker_id]) / 4;
+								} else {
+									g_bias_ppb[tracker_id] = raw_ppb;
+									g_bias_ppb_valid[tracker_id] = 2;
+								}
+							}
+							/* Refresh reference periodically */
+							if (elapsed > 60u * 32768u) {
+								g_bias_ref_offset[tracker_id] = g_last_ping_rx_time_diff_ticks[tracker_id];
+								g_bias_ref_ticks[tracker_id] = isr_rx_ticks;
+							}
+						}
+					}
+					g_last_ping_isr_rx_ticks_raw[tracker_id] = isr_rx_ticks;
 
 					uint64_t rx_time_diff_us
 						= k_ticks_to_us_floor64((rx_time_diff_ticks < 0 ? -rx_time_diff_ticks : rx_time_diff_ticks));
