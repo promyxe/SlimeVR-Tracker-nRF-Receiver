@@ -81,6 +81,7 @@ LOG_MODULE_REGISTER(esb_event, LOG_LEVEL_INF);
 #define TDMA_TPS_TIER_LOW    190  /* per-tracker TPS target for ≥7 trackers */
 #define TDMA_MIN_EFF_SLOT     18  /* effective slot floor → aggregate ≤ ~1820 TPS */
 #define TDMA_TOLERANCE_TICKS    3  /* slot violation tolerance band */
+#define TDMA_GUARD_TICKS       2  /* guard interval (2 ticks ≈ 61 μs) */
 #define TDMA_RECONFIG_MIN_MS 5000  /* minimum interval between TDMA reconfigurations */
 
 // Dynamic TDMA config packed into uint32_t for atomic ISR access (ARM Cortex-M).
@@ -190,6 +191,13 @@ static void tdma_recalculate(void)
 	uint8_t slot_ticks = (uint8_t)((numerator + denominator - 1) / denominator);
 	if (slot_ticks < TDMA_MIN_EFF_SLOT) {
 		slot_ticks = TDMA_MIN_EFF_SLOT;
+	}
+
+	/* Small guard interval (~122 us) between slots to prevent overlap
+	 * from minor timing jitter while keeping most of the TPS gain. */
+	{
+		uint16_t widened = (uint16_t)slot_ticks + TDMA_GUARD_TICKS;
+		slot_ticks = widened > 255 ? 255 : (uint8_t)widened;
 	}
 
 	tdma_config_epoch++;
@@ -340,7 +348,13 @@ static volatile bool g_last_isr_rx_valid[MAX_TRACKERS] = {false};
  * g_bias_ref_ticks: receiver ticks at the reference point.
  * g_last_ping_isr_rx_ticks_raw: ticks of the most recent PING,
  *   used as elapsed-time baseline for per-packet extrapolation. */
-static bool g_bias_ppb_valid[MAX_TRACKERS] = {0};
+/*
+ * g_bias_ppb_valid state machine:
+ *   0 = not initialized (no PING received yet)
+ *   1 = reference point set, warming up (need first long-baseline for PPM)
+ *   2 = fully valid with PPM estimate
+ */
+static uint8_t g_bias_ppb_valid[MAX_TRACKERS]; /* zero-initialized */
 static int32_t g_bias_ppb[MAX_TRACKERS] = {0};
 static int32_t g_bias_ref_offset[MAX_TRACKERS] = {0};
 static uint32_t g_bias_ref_ticks[MAX_TRACKERS] = {0};
@@ -1284,7 +1298,7 @@ void event_handler(struct esb_evt const *event)
 							g_bias_ref_offset[tracker_id] = g_last_ping_rx_time_diff_ticks[tracker_id];
 							g_bias_ref_ticks[tracker_id] = isr_rx_ticks;
 							g_bias_ppb[tracker_id] = 0;
-							g_bias_ppb_valid[tracker_id] = true;
+							g_bias_ppb_valid[tracker_id] = 1;
 						} else {
 							uint32_t elapsed = isr_rx_ticks - g_bias_ref_ticks[tracker_id];
 							if (elapsed >= 32768u) {
@@ -2804,9 +2818,10 @@ static void esb_thread(void)
 			tdma_config_packed[i] = tdma_pack_config(
 				i, tracker_count, init_slot, tdma_config_epoch);
 		}
-		tdma_dynamic_active_count = tracker_count;
+		/* Don't set tdma_active_mask / tdma_dynamic_active_count here —
+		 * leave them at 0 so the first tdma_recalculate() call always
+		 * sees a changed active set and runs through to apply the guard. */
 		tdma_dynamic_slot_ticks = init_slot;
-		tdma_active_mask = (1U << tracker_count) - 1;
 		uint32_t init_frame = (uint32_t)init_slot * tracker_count;
 		LOG_INF("TDMA initial: %u stored, slot=%u, frame=%u, ~%u TPS (epoch=%u)",
 			tracker_count, init_slot, init_frame,
