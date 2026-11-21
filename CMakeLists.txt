@@ -97,6 +97,13 @@ else()
   # No data collection: exclude both
   list(FILTER app_sources EXCLUDE REGEX ".*data_collect.*\\.c$")
 endif()
+if(CONFIG_BOARD_NRF52_BSIM)
+  # Simulated receiver (tools/bsim): USB/HID and OTA replaced by a logging stand-in.
+  list(FILTER app_sources EXCLUDE REGEX ".*/src/(usb|receiver_ota)\\.c$")
+  target_sources(app PRIVATE tools/bsim/port/usb_sim.c)
+  target_sources(native_simulator INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/tools/bsim/port/sim_host.c)
+  zephyr_compile_options("-DNRF_ERRATA_STATIC_CHECK(a,b)=0")
+endif()
 # NORDIC SDK APP START
 target_sources(app PRIVATE ${app_sources})
 # NORDIC SDK APP END
