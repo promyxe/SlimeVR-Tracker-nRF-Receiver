@@ -77,6 +77,7 @@ static unsigned int irq_lock(void) { return 0; }
 static void irq_unlock(unsigned int key) { (void)key; }
 static bool atomic_test_and_set_bit(atomic_t *a, int bit) { bool old=(*a & BIT(bit))!=0; *a |= BIT(bit); return old; }
 static bool atomic_test_and_clear_bit(atomic_t *a, int bit) { bool old=(*a & BIT(bit))!=0; *a &= ~BIT(bit); return old; }
+static bool atomic_test_bit(const atomic_t *a, int bit) { return (*a & BIT(bit))!=0; }
 static void atomic_clear_bit(atomic_t *a, int bit) { *a &= ~BIT(bit); }
 struct device { int unused; } device;
 struct k_work { void (*handler)(struct k_work *); int64_t due; bool queued; unsigned runs; };
