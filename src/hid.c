@@ -791,8 +791,13 @@ static bool hid_type_has_rssi_slot(uint8_t type)
 static bool hid_enqueue_packet(const uint8_t data[16], uint32_t generation)
 {
 	if (hid_fifo_try_push(data, hid_fifo_is_priority(data[0]), generation)) {
-		/* Schedule, not reschedule: continuous producers cannot postpone TX. */
-		k_work_schedule(&report_send, REPORT_PERIOD);
+		/* Schedule, not reschedule: continuous producers cannot postpone TX.
+		 * Idle endpoint: submit now (records queued before the work item runs
+		 * still coalesce). Busy endpoint: the IN-done callback drains the
+		 * backlog, so the delayed schedule is only a fallback. */
+		k_work_schedule(&report_send,
+				atomic_test_bit(hid_ep_in_busy, HID_EP_BUSY_FLAG) ? REPORT_PERIOD
+										  : K_NO_WAIT);
 		return true;
 	}
 

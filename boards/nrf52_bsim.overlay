@@ -1,0 +1,24 @@
+/* Simulated receiver (BabbleSim, tools/bsim). */
+/ {
+	chosen {
+		zephyr,code-partition = &slot0_partition;
+	};
+};
+
+&flash0 {
+	/delete-node/ partitions;
+	partitions {
+		compatible = "fixed-partitions";
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		slot0_partition: partition@1000 {
+			label = "application";
+			reg = <0x00001000 0x00070000>;
+		};
+		storage_partition: partition@71000 {
+			label = "storage";
+			reg = <0x00071000 0x00006000>;
+		};
+	};
+};

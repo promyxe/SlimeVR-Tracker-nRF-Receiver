@@ -124,8 +124,13 @@ void k_sys_fatal_error_handler(unsigned int reason, const struct arch_esf *esf)
 	fatal_record.magic = 0;
 	__DMB();
 	fatal_record.reason = reason;
+#if defined(CONFIG_ARCH_POSIX) /* no Cortex-M exception frame */
+	fatal_record.pc = 0;
+	fatal_record.lr = 0;
+#else
 	fatal_record.pc = esf ? esf->basic.pc : 0;
 	fatal_record.lr = esf ? esf->basic.lr : 0;
+#endif
 	/* k_current_get() is not allowed before the kernel starts. */
 	fatal_record.thread = k_is_pre_kernel() ? 0 : (uint32_t)(uintptr_t)k_current_get();
 	fatal_record.reset_reason = boot_reset_reason;
